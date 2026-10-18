@@ -1,0 +1,42 @@
+# OPTIONAL. The recommended way on Windows is the native setup (npm run setup / npm run dev).
+# Full stack in containers:   podman compose up --build   (or docker compose up --build)
+# Secrets come from ./server/.env (created by npm run setup) and ./.env (FACE_SERVICE_SECRET).
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    # Not published to the host; only the server can reach it.
+
+  face-service:
+    build: ./face-service
+    restart: unless-stopped
+    environment:
+      FACE_SERVICE_SECRET: ${FACE_SERVICE_SECRET:?set FACE_SERVICE_SECRET in .env next to this file}
+    # No "ports:" on purpose — internal network only.
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    env_file: ./server/.env
+    environment:
+      NODE_ENV: production
+      MONGO_URI: mongodb://mongo:27017/dementia_assistant
+      FACE_SERVICE_URL: http://face-service:8000
+      FACE_SERVICE_SECRET: ${FACE_SERVICE_SECRET}
+      CLIENT_ORIGINS: http://localhost:4000
+      CLIENT_DIST: /app/client-dist
+    volumes:
+      - uploads:/app/uploads
+      - ./client/dist:/app/client-dist:ro   # run `npm --prefix client run build` first
+    ports:
+      - '4000:4000'
+    depends_on:
+      - mongo
+      - face-service
+
+
+volumes:
+  mongo-data:
+  uploads:

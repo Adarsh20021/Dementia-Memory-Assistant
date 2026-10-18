@@ -1,0 +1,404 @@
+openapi: 3.0.3
+info:
+  title: Dementia Memory Assistant API
+  version: 1.0.0
+  description: |
+    REST API of the AI-Based Dementia Memory Assistant.
+    All routes are under `/api`. Errors have the shape `{ "error": { "code", "message", "details?" } }`.
+
+    Auth: `Authorization: Bearer <accessToken>` (15 min JWT). The refresh token is an httpOnly,
+    SameSite=Strict cookie on `/api/auth`. Roles: `caregiver`, `patient`.
+    Every `/patients/{patientId}/...` route checks ownership (404 if not yours) and role (403).
+servers:
+  - url: http://localhost:4000/api
+security:
+  - bearer: []
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    patientId: { name: patientId, in: path, required: true, schema: { type: string } }
+    personId: { name: personId, in: path, required: true, schema: { type: string } }
+    id: { name: id, in: path, required: true, schema: { type: string } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details: { type: array, items: { type: object, properties: { path: { type: string }, message: { type: string } } } }
+    User:
+      type: object
+      properties: { id: { type: string }, name: { type: string }, email: { type: string }, role: { type: string, enum: [caregiver, patient] } }
+    Session:
+      type: object
+      properties: { accessToken: { type: string }, user: { $ref: '#/components/schemas/User' } }
+    Patient:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        dob: { type: string, format: date-time }
+        preferences: { type: object, properties: { language: { type: string }, fontScale: { type: number }, voiceRate: { type: number } } }
+        settings: { type: object, properties: { retentionDays: { type: integer } } }
+    Consent:
+      type: object
+      required: [given, givenBy, givenByRole]
+      properties:
+        given: { type: boolean, enum: [true] }
+        givenBy: { type: string, description: Who consented }
+        givenByRole: { type: string, enum: [person, caregiver] }
+        reason: { type: string, description: Required when givenByRole = caregiver }
+        givenAt: { type: string, format: date-time }
+        scope: { type: array, items: { type: string, enum: [recognition, visit-history, conversation-summaries] } }
+    Person:
+      type: object
+      description: Embeddings are never returned.
+      properties:
+        id: { type: string }
+        name: { type: string }
+        relationship: { type: string }
+        age: { type: integer }
+        notes: { type: string }
+        photoCount: { type: integer }
+        photos: { type: array, items: { type: object, properties: { id: { type: string }, addedAt: { type: string } } } }
+        enrolledFaceCount: { type: integer }
+        isActive: { type: boolean }
+        hasActiveConsent: { type: boolean }
+        consent: { $ref: '#/components/schemas/Consent' }
+    RecognitionResult:
+      type: object
+      properties:
+        eventId: { type: string }
+        outcome: { type: string, enum: [match, unsure, unknown, no_face, liveness_failed] }
+        message: { type: string, example: 'This is Priya, your daughter. They last visited on Sunday 12 October.' }
+        score: { type: number }
+        visitId: { type: string }
+        needsCaregiverConfirmation: { type: boolean }
+        person:
+          type: object
+          properties: { id: { type: string }, name: { type: string }, relationship: { type: string }, photoUrl: { type: string } }
+    Memory:
+      type: object
+      properties:
+        id: { type: string }
+        personId: { type: string }
+        visitId: { type: string }
+        summary: { type: string }
+        source: { type: string, enum: [caregiver, ai-summary, patient] }
+        reviewStatus: { type: string, enum: [pending, approved, flagged] }
+        consentApproved: { type: boolean }
+        version: { type: integer }
+        mine: { type: boolean }
+        history: { type: array, description: caregiver only, items: { type: object, properties: { version: { type: integer }, summary: { type: string }, editedAt: { type: string } } } }
+    Note:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [note, reminder] }
+        text: { type: string }
+        dueAt: { type: string, format: date-time }
+        completed: { type: boolean }
+        mine: { type: boolean }
+    Visit:
+      type: object
+      properties:
+        id: { type: string }
+        personId: { type: string }
+        personName: { type: string }
+        timestamp: { type: string, format: date-time }
+        matchConfidence: { type: number }
+        outcome: { type: string, enum: [match, unsure, manual] }
+        needsConfirmation: { type: boolean }
+        confirmedByCaregiver: { type: boolean }
+
+paths:
+  /health:
+    get: { tags: [System], security: [], summary: 'Liveness probe', responses: { '200': { description: OK } } }
+
+  # ------------------------------------------------------------------ auth
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 'Create a caregiver account (password 10+ chars, upper, lower, digit)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [name, email, password], properties: { name: { type: string }, email: { type: string }, password: { type: string } } } } } }
+      responses: { '201': { description: Created }, '400': { $ref: '#/components/responses/Error' }, '409': { $ref: '#/components/responses/Error' } }
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 'Caregiver login. Sets the refresh cookie. 423 after repeated failures.'
+      requestBody: { content: { application/json: { schema: { type: object, required: [email, password], properties: { email: { type: string }, password: { type: string } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '423': { $ref: '#/components/responses/Error' }
+  /auth/pair:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 'Patient device sign-in with a single-use caregiver-issued code'
+      requestBody: { content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, example: K7QM-3RXA } } } } } }
+      responses: { '200': { description: Session + patient }, '400': { $ref: '#/components/responses/Error' } }
+  /auth/pin-status:
+    post: { tags: [Auth], summary: 'Does this patient have a PIN? { patientId } -> { pinEnabled }', responses: { '200': { description: OK } } }
+  /auth/pin:
+    post: { tags: [Auth], summary: 'Patient sign-in with PIN on a device paired before { patientId, pin } (locks after repeated failures)', responses: { '200': { description: OK }, '401': { description: Wrong PIN }, '423': { description: Locked } } }
+  /auth/refresh:
+    post: { tags: [Auth], security: [], summary: 'Rotate refresh cookie, get new access token (reuse revokes all sessions)', responses: { '200': { description: OK }, '401': { $ref: '#/components/responses/Error' } } }
+  /auth/logout:
+    post: { tags: [Auth], security: [], summary: 'Revoke current refresh token', responses: { '204': { description: Done } } }
+  /auth/me:
+    get: { tags: [Auth], summary: 'Current user', responses: { '200': { description: OK } } }
+
+  # ------------------------------------------------------------------ patients
+  /patients:
+    get: { tags: [Patients], summary: 'List my patients (caregiver)', responses: { '200': { description: OK } } }
+    post:
+      tags: [Patients]
+      summary: 'Create patient (caregiver)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, dob: { type: string }, preferences: { type: object } } } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { type: object, properties: { patient: { $ref: '#/components/schemas/Patient' } } } } } } }
+  /patients/me:
+    get: { tags: [Patients], summary: 'Own record (patient)', responses: { '200': { description: OK } } }
+  /patients/me/preferences:
+    patch:
+      tags: [Patients]
+      summary: 'Patient changes font size / voice speed only'
+      requestBody: { content: { application/json: { schema: { type: object, properties: { fontScale: { type: number, minimum: 1, maximum: 2.5 }, voiceRate: { type: number, minimum: 0.5, maximum: 1.5 } } } } } }
+      responses: { '200': { description: OK } }
+  /patients/{patientId}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Patients], summary: 'Get patient (caregiver)', responses: { '200': { description: OK } } }
+    patch: { tags: [Patients], summary: 'Update name / dob / preferences (caregiver)', responses: { '200': { description: OK } } }
+    delete:
+      tags: [Patients]
+      summary: 'Delete ALL of this patient''s data (caregiver)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [confirm], properties: { confirm: { type: string, enum: [DELETE] } } } } } }
+      responses: { '204': { description: Deleted } }
+  /patients/{patientId}/pairing-code:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post: { tags: [Patients], summary: 'Issue single-use device pairing code (15 min)', responses: { '201': { description: '{ code, expiresAt }' } } }
+  /patients/{patientId}/device-session:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post: { tags: [Patients], summary: 'One-tap: switch THIS browser to patient mode (caregiver signed out here)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/pin:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    put: { tags: [Patients], summary: 'Set the patient PIN { pin: 4-6 digits }', responses: { '200': { description: OK }, '400': { description: Too simple } } }
+    delete: { tags: [Patients], summary: 'Remove the PIN', responses: { '200': { description: OK } } }
+  /patients/{patientId}/revoke-devices:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post: { tags: [Patients], summary: 'Sign out all patient devices', responses: { '204': { description: Done } } }
+  /patients/{patientId}/settings:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Patients], summary: 'Thresholds (read-only), language, retention', responses: { '200': { description: OK } } }
+    patch:
+      tags: [Patients]
+      summary: 'Update language / retentionDays'
+      requestBody: { content: { application/json: { schema: { type: object, properties: { language: { type: string }, retentionDays: { type: integer, minimum: 1, maximum: 3650 } } } } } }
+      responses: { '200': { description: OK } }
+  /patients/{patientId}/audit-logs:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { name: limit, in: query, schema: { type: integer } }, { name: before, in: query, schema: { type: string, format: date-time } }]
+    get: { tags: [Patients], summary: 'Audit log (caregiver)', responses: { '200': { description: OK } } }
+
+  # ------------------------------------------------------------------ people + consent + enrollment
+  /patients/{patientId}/people:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [People], summary: 'List familiar people (caregiver)', responses: { '200': { description: OK } } }
+    post:
+      tags: [People]
+      summary: 'Add familiar person — consent is mandatory'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, relationship, consent]
+              properties: { name: { type: string }, relationship: { type: string }, age: { type: integer }, notes: { type: string }, consent: { $ref: '#/components/schemas/Consent' } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { type: object, properties: { person: { $ref: '#/components/schemas/Person' } } } } } } }
+  /patients/{patientId}/people/{personId}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    get: { tags: [People], summary: 'Get person', responses: { '200': { description: OK } } }
+    patch: { tags: [People], summary: 'Update name / relationship / age / notes (not consent)', responses: { '200': { description: OK } } }
+    delete: { tags: [People], summary: 'Delete person, photos, embeddings, visits, memories', responses: { '204': { description: Deleted } } }
+  /patients/{patientId}/people/{personId}/consent:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    post:
+      tags: [People]
+      summary: 'Record consent again after a revocation (409 if already active)'
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Consent' } } } }
+      responses: { '200': { description: OK } }
+  /patients/{patientId}/people/{personId}/consent/revoke:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    post: { tags: [People], summary: 'Revoke consent — deletes photos + embeddings, deactivates, audits', responses: { '200': { description: OK } } }
+  /patients/{patientId}/people/{personId}/photos:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    post:
+      tags: [People]
+      summary: 'Enroll 1-5 face photos (consent-gated; each quality-checked)'
+      requestBody: { content: { multipart/form-data: { schema: { type: object, properties: { photos: { type: array, items: { type: string, format: binary } } } } } } }
+      responses:
+        '201': { description: 'At least one added: { results[], person, needsMore }' }
+        '403': { description: CONSENT_REQUIRED }
+        '415': { description: Not a JPG/PNG/WebP }
+        '422': { description: 'None added (results explain why: no_face, multiple_faces, face_too_small, too_blurry, too_dark, too_bright, face_turned, limit_reached)' }
+    delete: { tags: [People], summary: 'Remove all photos + embeddings (re-enroll)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/people/{personId}/photos/{id}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }, { $ref: '#/components/parameters/id' }]
+    get: { tags: [People], summary: 'View photo (decrypted, no-store)', responses: { '200': { description: Image } } }
+    delete: { tags: [People], summary: 'Remove one photo and its embedding', responses: { '200': { description: OK } } }
+
+  # ------------------------------------------------------------------ recognition (patient or caregiver)
+  /patients/{patientId}/recognize:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post:
+      tags: [Recognition]
+      summary: '"Who is this?" — 1-8 camera frames (processed in memory, never stored)'
+      requestBody: { content: { multipart/form-data: { schema: { type: object, properties: { frames: { type: array, items: { type: string, format: binary } } } } } } }
+      responses:
+        '200': { description: Result, content: { application/json: { schema: { $ref: '#/components/schemas/RecognitionResult' } } } }
+        '503': { description: Face service unavailable (friendly message) }
+  /patients/{patientId}/recognitions/{id}/timing:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    post:
+      tags: [Recognition]
+      summary: 'Client latency report (evaluation)'
+      requestBody: { content: { application/json: { schema: { type: object, properties: { captureMs: { type: number }, clientRoundTripMs: { type: number }, resultToSpeechMs: { type: number }, endToEndMs: { type: number } } } } } }
+      responses: { '204': { description: Stored } }
+  /patients/{patientId}/faces/{personId}/photo:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    get: { tags: [Recognition], summary: 'Result-card photo (consented people only)', responses: { '200': { description: Image } } }
+  /patients/{patientId}/ask:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post:
+      tags: [Recognition]
+      summary: 'Simple question answered from the database (Groq only rephrases)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [question], properties: { question: { type: string, example: 'When did Priya last visit?' } } } } } }
+      responses: { '200': { description: '{ answer, source, found }' } }
+  /patients/{patientId}/help-requests:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { name: open, in: query, schema: { type: string, enum: ['true', 'false'] } }]
+    post: { tags: [Recognition], summary: '"Ask my caregiver" (patient or caregiver)', responses: { '201': { description: Created } } }
+    get: { tags: [Dashboard], summary: 'List help requests (caregiver)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/help-requests/{id}/resolve:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    post: { tags: [Dashboard], summary: 'Mark handled', responses: { '200': { description: OK } } }
+
+  # ------------------------------------------------------------------ memories, notes, visits
+  /patients/{patientId}/memories:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get:
+      tags: [Memories]
+      summary: 'List (patient: own only; caregiver: all, filterable)'
+      parameters: [{ name: personId, in: query, schema: { type: string } }, { name: source, in: query, schema: { type: string } }, { name: reviewStatus, in: query, schema: { type: string } }, { name: q, in: query, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+    post:
+      tags: [Memories]
+      summary: 'Create. Patient -> pending. Caregiver (source caregiver | ai-summary) -> approved.'
+      requestBody: { content: { application/json: { schema: { type: object, required: [summary], properties: { summary: { type: string }, personId: { type: string }, visitId: { type: string }, source: { type: string, enum: [caregiver, ai-summary] } } } } } }
+      responses: { '201': { description: Created }, '409': { description: NO_SUMMARY_CONSENT } }
+  /patients/{patientId}/memories/draft:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    post:
+      tags: [Memories]
+      summary: 'Groq drafts a summary from caregiver notes (NOT stored)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [personId, notes], properties: { personId: { type: string }, notes: { type: string } } } } } }
+      responses: { '200': { description: '{ draft | null, source: llm | unavailable, warning? }' } }
+  /patients/{patientId}/memories/review-queue:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Memories], summary: 'Patient entries awaiting review (caregiver)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/memories/{id}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    get: { tags: [Memories], summary: 'Get (caregiver gets version history)', responses: { '200': { description: OK } } }
+    patch: { tags: [Memories], summary: 'Edit -> new version (patient edit -> pending again)', responses: { '200': { description: OK } } }
+    delete: { tags: [Memories], summary: 'Delete (patient: own only)', responses: { '204': { description: Deleted } } }
+  /patients/{patientId}/memories/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    post:
+      tags: [Memories]
+      summary: 'Approve / flag / correct (original kept in history)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [action], properties: { action: { type: string, enum: [approve, flag, correct] }, summary: { type: string } } } } } }
+      responses: { '200': { description: OK } }
+  /patients/{patientId}/memories/{id}/retell:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    post: { tags: [Memories], summary: '"Tell me simply": AI re-telling of one approved memory (original text for anything else)', responses: { '200': { description: '{ text, source: llm | cache | fallback | original }' } } }
+  /patients/{patientId}/schedule:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Schedule], summary: 'Planned visits ?range=upcoming|past|all&personId', responses: { '200': { description: OK } } }
+    post: { tags: [Schedule], summary: 'Plan a visit { personId | visitorName, startsAt, durationMin?, note? } (caregiver or patient)', responses: { '201': { description: Created } } }
+  /patients/{patientId}/schedule/{id}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    patch: { tags: [Schedule], summary: 'Change (patient: own only; anyone may mark done)', responses: { '200': { description: OK } } }
+    delete: { tags: [Schedule], summary: 'Remove (patient: own only)', responses: { '204': { description: Deleted } } }
+  /patients/{patientId}/people-directory:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [People], summary: 'First names + relationships for pickers (patient or caregiver)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/story/{personId}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/personId' }]
+    get: { tags: [Recognition], summary: 'Shared memories, visits and next planned visit with one person', responses: { '200': { description: OK } } }
+  /system/status:
+    get: { tags: [System], summary: 'AI + face-service status (caregiver)', responses: { '200': { description: OK } } }
+  /system/ai-test:
+    post: { tags: [System], summary: 'One tiny AI request; reports what happened (caregiver)', responses: { '200': { description: OK } } }
+  /patients/{patientId}/notes:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Notes], summary: 'List (patient: own only)', responses: { '200': { description: OK } } }
+    post:
+      tags: [Notes]
+      summary: 'Create note / reminder (text encrypted at rest)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string }, kind: { type: string, enum: [note, reminder] }, dueAt: { type: string }, personId: { type: string } } } } } }
+      responses: { '201': { description: Created } }
+  /patients/{patientId}/notes/{id}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    patch: { tags: [Notes], summary: 'Edit (patient: own only)', responses: { '200': { description: OK } } }
+    delete: { tags: [Notes], summary: 'Delete (patient: own only)', responses: { '204': { description: Deleted } } }
+  /patients/{patientId}/visits:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get:
+      tags: [Visits]
+      summary: 'List visits (caregiver)'
+      parameters: [{ name: personId, in: query, schema: { type: string } }, { name: from, in: query, schema: { type: string } }, { name: to, in: query, schema: { type: string } }, { name: needsConfirmation, in: query, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+    post: { tags: [Visits], summary: 'Record a visit manually', responses: { '201': { description: Created } } }
+  /patients/{patientId}/visits/{id}/confirm:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    post:
+      tags: [Visits]
+      summary: 'Confirm or reject an "unsure" recognition'
+      requestBody: { content: { application/json: { schema: { type: object, required: [confirmed], properties: { confirmed: { type: boolean } } } } } }
+      responses: { '200': { description: OK } }
+  /patients/{patientId}/visits/{id}:
+    parameters: [{ $ref: '#/components/parameters/patientId' }, { $ref: '#/components/parameters/id' }]
+    delete: { tags: [Visits], summary: 'Delete visit', responses: { '204': { description: Deleted } } }
+
+  # ------------------------------------------------------------------ dashboard + evaluation
+  /patients/{patientId}/overview:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Dashboard], summary: 'Counts, recent events, unsure visits, pending reviews, help requests, low-confidence people', responses: { '200': { description: OK } } }
+  /patients/{patientId}/export:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Dashboard], summary: 'All data as JSON (no photos / embeddings)', responses: { '200': { description: JSON attachment } } }
+  /patients/{patientId}/evaluation/summary:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Evaluation], summary: 'Latency percentiles, outcomes, LLM fallback rate', responses: { '200': { description: OK } } }
+  /patients/{patientId}/evaluation/events.csv:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Evaluation], summary: 'Per-recognition log as CSV', responses: { '200': { description: text/csv } } }
+  /patients/{patientId}/sus:
+    parameters: [{ $ref: '#/components/parameters/patientId' }]
+    get: { tags: [Evaluation], summary: 'SUS items, responses and mean score', responses: { '200': { description: OK } } }
+    post:
+      tags: [Evaluation]
+      summary: 'Record one SUS questionnaire (10 answers, 1-5)'
+      requestBody: { content: { application/json: { schema: { type: object, required: [respondentRole, answers], properties: { respondentRole: { type: string, enum: [caregiver, patient, family, other] }, answers: { type: array, minItems: 10, maxItems: 10, items: { type: integer, minimum: 1, maximum: 5 } }, comment: { type: string } } } } } }
+      responses: { '201': { description: '{ id, score }' } }

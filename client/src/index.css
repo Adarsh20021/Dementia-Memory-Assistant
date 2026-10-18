@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens (RGB triplets so Tailwind can apply opacity).
+ * Light: "Quiet care" — stone background, forest-green actions, green sidebar.
+ * Dark:  "Midnight"   — ink-navy background, mint-green actions, low glare.
+ */
+:root {
+  color-scheme: light;
+  --bg: 243 244 241;
+  --surface: 252 252 250;
+  --line: 222 225 218;
+  --ink: 30 43 36;
+  --sub: 85 97 90;
+  --brand: 47 93 69;
+  --brand-hover: 38 76 56;
+  --on-brand: 255 255 255;
+  --soft: 225 235 227;
+  --soft-ink: 36 80 58;
+  --side: 35 74 55;
+  --side-ink: 214 231 221;
+  --side-active: 255 255 255;
+  --side-active-ink: 30 60 44;
+  --cam: 22 34 28;
+  --help: 154 91 0;
+  --help-hover: 122 72 0;
+  --on-help: 255 255 255;
+  --danger: 161 34 34;
+  --on-danger: 255 255 255;
+  --ok-bg: 220 240 228;
+  --ok-ink: 23 98 60;
+  --warn-bg: 245 232 207;
+  --warn-ink: 111 74 14;
+  --bad-bg: 253 232 232;
+  --bad-ink: 161 34 34;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: 14 20 36;
+  --surface: 21 28 48;
+  --line: 36 48 80;
+  --ink: 232 238 251;
+  --sub: 160 173 204;
+  --brand: 79 203 148;
+  --brand-hover: 108 218 170;
+  --on-brand: 6 36 26;
+  --soft: 31 44 74;
+  --soft-ink: 159 224 196;
+  --side: 10 15 28;
+  --side-ink: 160 173 204;
+  --side-active: 27 39 69;
+  --side-active-ink: 232 238 251;
+  --cam: 6 10 20;
+  --help: 242 200 121;
+  --help-hover: 250 215 150;
+  --on-help: 52 38 10;
+  --danger: 240 128 128;
+  --on-danger: 40 8 8;
+  --ok-bg: 20 58 51;
+  --ok-ink: 127 224 188;
+  --warn-bg: 62 48 20;
+  --warn-ink: 242 200 121;
+  --bad-bg: 69 28 36;
+  --bad-ink: 255 170 170;
+}
+
+/* Root font size is set by the app: 20px+ in patient mode (scaled by fontScale), 16px for caregivers. */
+html {
+  accent-color: rgb(var(--brand));
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  @apply bg-bg font-sans text-ink antialiased;
+  line-height: 1.55;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+@layer base {
+  h1,
+  h2,
+  h3 {
+    @apply font-serif tracking-tight;
+  }
+  h1 {
+    font-weight: 600;
+  }
+}
+
+/* Calm, visible focus for keyboard and switch users. */
+:focus-visible {
+  outline: 3px solid #f0a500;
+  outline-offset: 3px;
+}
+
+/* No flashing or sudden movement for anyone who asks the OS for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-touch items-center justify-center gap-2 rounded-xl px-6 font-semibold
+      transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-on-brand shadow-sm hover:bg-brand-hover;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink shadow-sm hover:border-brand hover:bg-soft;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-on-danger hover:opacity-90;
+  }
+  .btn-help {
+    @apply btn bg-help text-on-help hover:bg-help-hover;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-surface p-6 shadow-[0_1px_2px_rgb(0_0_0/0.04)];
+  }
+  .input {
+    @apply min-h-touch w-full rounded-xl border border-line bg-surface px-4 py-2 text-ink
+      placeholder:text-sub/70 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25;
+  }
+  .label {
+    @apply mb-1 block font-semibold;
+  }
+  .badge {
+    @apply inline-block rounded-full px-3 py-0.5 text-sm font-semibold;
+  }
+  /* Caregiver sidebar links */
+  .side-link {
+    @apply flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-side-ink
+      transition-colors hover:bg-white/10;
+  }
+  .side-link-active {
+    @apply bg-side-active text-side-active-ink shadow-sm hover:bg-side-active;
+  }
+  /* Dark theme: active item and logo pick up the mint-green accent. */
+  .dark .side-link-active svg {
+    @apply text-brand;
+  }
+  .dark .brand-mark {
+    @apply bg-brand/15 text-brand ring-brand/30;
+  }
+}

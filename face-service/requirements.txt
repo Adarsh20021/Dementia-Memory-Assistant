@@ -1,0 +1,10 @@
+fastapi>=0.115,<1
+uvicorn>=0.32,<1
+pydantic>=2.7,<3
+numpy>=1.26
+opencv-python-headless>=4.9
+onnxruntime>=1.17
+# development / evaluation
+pytest>=8
+httpx>=0.27
+matplotlib>=3.8

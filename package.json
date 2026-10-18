@@ -1,0 +1,19 @@
+{
+  "name": "dementia-memory-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-Based Dementia Memory Assistant Using Face Recognition (monorepo scripts)",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/start.mjs",
+    "seed": "npm --prefix server run seed",
+    "test": "npm --prefix server test && node scripts/run-python.mjs -m pytest -q face-service/tests",
+    "test:e2e": "npm --prefix client run e2e",
+    "evaluate": "node scripts/run-python.mjs face-service/eval/evaluate.py",
+    "benchmark": "node scripts/run-python.mjs face-service/eval/benchmark.py",
+    "lint": "npm --prefix server run lint && npm --prefix client run lint",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix client run typecheck"
+  },
+  "engines": { "node": ">=20" }
+}
