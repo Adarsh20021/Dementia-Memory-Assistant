@@ -10,7 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { CalendarClock, Camera, CameraOff, PenLine, ScanFace, Sparkles } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
 import type { AskResponse, PersonStory, RecognitionResult, ScheduledVisit } from '../../api/types';
@@ -356,15 +356,11 @@ function AskBox() {
   const [result, setResult] = useState<AskResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const prefs = patient!.preferences;
-  const onText = useCallback((t: string) => setQuestion((q) => (q ? `${q} ${t}` : t)), []);
-  const mic = useSpeechInput(onText, prefs.language);
-
-  const ask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (question.trim().length < 2) return;
+  const askQuestion = async (q: string) => {
+    if (q.trim().length < 2) return;
     setBusy(true);
     try {
-      const r = await api<AskResponse>(`/api/patients/${patient!.id}/ask`, { body: { question } });
+      const r = await api<AskResponse>(`/api/patients/${patient!.id}/ask`, { body: { question: q.trim() } });
       setResult(r);
       void say(r.summary ? `${r.answer} ${r.summary}` : r.answer);
     } catch {
@@ -373,6 +369,19 @@ function AskBox() {
       setBusy(false);
     }
   };
+  const ask = (e: React.FormEvent) => {
+    e.preventDefault();
+    void askQuestion(question);
+  };
+  const askRef = useRef(askQuestion);
+  askRef.current = askQuestion;
+  // A spoken question replaces the box and is asked straight away.
+  const onText = useCallback((t: string) => {
+    const q = t.trim().slice(0, 300);
+    setQuestion(q);
+    void askRef.current(q);
+  }, []);
+  const mic = useSpeechInput(onText, prefs.language);
 
   return (
     <form onSubmit={ask} className="card flex flex-col gap-3">
@@ -383,10 +392,16 @@ function AskBox() {
         id="ask"
         className="input text-xl"
         placeholder="When is Priya coming?"
-        value={question}
+        value={mic.listening && mic.interim ? `${question} ${mic.interim}`.trim() : question}
         onChange={(e) => setQuestion(e.target.value)}
+        readOnly={mic.listening}
         maxLength={300}
       />
+      {mic.listening && (
+        <p className="text-sub" role="status">
+          {mic.interim ? `I heard: "${mic.interim}"` : 'Listening… ask your question. I will stop when you finish.'}
+        </p>
+      )}
       <div className="flex flex-wrap gap-3">
         <button className="btn-primary" disabled={busy || question.trim().length < 2}>
           {busy ? 'Thinking…' : 'Ask'}
@@ -394,6 +409,7 @@ function AskBox() {
         <MicButton
           supported={mic.supported}
           listening={mic.listening}
+          transcribing={mic.transcribing}
           onStart={mic.start}
           onStop={mic.stop}
         />

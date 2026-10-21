@@ -121,9 +121,12 @@ export function MicButton({
   onStart,
   onStop,
   label = 'Speak',
+  transcribing = false,
 }: {
   supported: boolean;
   listening: boolean;
+  /** The recording is being turned into text. */
+  transcribing?: boolean;
   onStart: () => void;
   onStop: () => void;
   label?: string;
@@ -135,6 +138,12 @@ export function MicButton({
         Voice typing is not available in this browser. Please type, or open the app in Chrome or Edge.
       </p>
     );
+  if (transcribing)
+    return (
+      <button type="button" className="btn-secondary" disabled aria-live="polite">
+        <Mic size={22} aria-hidden className="animate-pulse" /> Writing it down…
+      </button>
+    );
   return (
     <button
       type="button"
@@ -143,7 +152,7 @@ export function MicButton({
       aria-pressed={listening}
     >
       {listening ? <Square size={20} aria-hidden /> : <Mic size={22} aria-hidden />}{' '}
-      {listening ? 'Listening… tap to stop' : label}
+      {listening ? 'Listening… tap when done' : label}
     </button>
   );
 }

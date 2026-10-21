@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   History,
+  House,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -14,7 +15,6 @@ import {
   Settings,
   Sun,
   Users,
-  UsersRound,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -101,7 +101,12 @@ export function CaregiverLayout() {
     <div className="min-h-screen lg:flex">
       <aside className="bg-side text-side-ink lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col">
         <div className="flex items-center justify-between px-5 py-4 lg:py-6">
-          <Link to="/care" className="flex items-center gap-3 text-white" onClick={() => setOpen(false)}>
+          <Link
+            to="/care"
+            className="flex items-center gap-3 text-white"
+            onClick={() => setOpen(false)}
+            aria-label="Memory Assistant, go to home (all patients)"
+          >
             <BrandMark />
             <span className="leading-tight">
               <span className="block font-serif text-lg font-semibold">Memory Assistant</span>
@@ -122,8 +127,8 @@ export function CaregiverLayout() {
           className={`${open ? 'flex' : 'hidden'} flex-1 flex-col overflow-y-auto px-3 pb-4 lg:flex`}
         >
           <NavLink to="/care" end className={sideClass} onClick={() => setOpen(false)}>
-            <UsersRound size={18} aria-hidden />
-            Patients
+            <House size={18} aria-hidden />
+            Home · All patients
           </NavLink>
           {patientId && <PatientNav patientId={patientId} onNavigate={() => setOpen(false)} />}
           <div className="mt-auto flex flex-col gap-1 border-t border-white/10 pt-4">
@@ -228,6 +233,7 @@ export function PatientsList() {
 
 export function PatientShell() {
   const { patientId } = useParams();
+  const onOverview = !!useMatch('/care/patients/:patientId');
   const { data } = useQuery({
     queryKey: ['patient', patientId],
     queryFn: () => api<{ patient: Patient }>(`/api/patients/${patientId}`),
@@ -235,14 +241,20 @@ export function PatientShell() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <nav aria-label="Breadcrumb" className="text-sm text-sub">
-          <Link to="/care" className="hover:text-ink hover:underline">
-            Patients
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center text-sm text-sub">
+          <Link to="/care" className="inline-flex items-center gap-1 hover:text-ink hover:underline">
+            <House size={14} aria-hidden /> Home
           </Link>
           <span aria-hidden className="mx-2">
             /
           </span>
-          <span>{data?.patient.name ?? '…'}</span>
+          {onOverview ? (
+            <span>{data?.patient.name ?? '…'}</span>
+          ) : (
+            <Link to={`/care/patients/${patientId}`} className="hover:text-ink hover:underline">
+              {data?.patient.name ?? '…'}
+            </Link>
+          )}
         </nav>
         <h1 className="mt-1 text-3xl">{data?.patient.name ?? '…'}</h1>
       </div>

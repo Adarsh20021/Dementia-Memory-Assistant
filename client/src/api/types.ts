@@ -205,4 +205,11 @@ export interface SystemStatus {
     modelsLoaded: boolean;
     problem?: 'secret_mismatch' | 'models_not_loaded' | 'not_running';
   };
+  /** Voice typing (speech-to-text). Missing on older servers. */
+  voice?: {
+    enabled: boolean;
+    mode: 'groq' | 'off';
+    model: string;
+    lastCall: { at: string; ok: boolean; httpStatus?: number; detail?: string; model?: string } | null;
+  };
 }

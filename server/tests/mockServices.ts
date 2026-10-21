@@ -33,6 +33,9 @@ export interface Mocks {
   llmReply: (body: Json) => string;
   lastAnalyze?: Json;
   llmRequests: Json[];
+  /** Override the transcription reply: text, or 'ERROR' for a 500. */
+  sttReply: () => string;
+  sttRequests: { model?: string; language?: string; bytes: number }[];
   close: () => Promise<void>;
 }
 
@@ -42,6 +45,8 @@ export async function startMocks(port = 45999): Promise<Mocks> {
     faceUp: true,
     llmReply: () => 'This is Priya, your daughter. She visited you recently.',
     llmRequests: [],
+    sttReply: () => 'When is Priya coming',
+    sttRequests: [],
     close: async () => undefined,
   };
 
@@ -49,6 +54,23 @@ export async function startMocks(port = 45999): Promise<Mocks> {
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
+      if (req.url === '/groq/audio/transcriptions') {
+        if (req.headers.authorization !== 'Bearer test-groq-key') {
+          res.writeHead(401);
+          return res.end();
+        }
+        const field = (n: string) => raw.match(new RegExp(`name="${n}"\\r\\n\\r\\n([^\\r]*)`))?.[1];
+        mocks.sttRequests.push({ model: field('model'), language: field('language'), bytes: raw.length });
+        const reply = mocks.sttReply();
+        if (reply === 'MODEL_BLOCKED') {
+          res.writeHead(403, { 'content-type': 'application/json' });
+          return res.end(
+            JSON.stringify({ error: { message: 'The model `whisper-large-v3-turbo` is blocked at the organization level.' } }),
+          );
+        }
+        res.writeHead(reply === 'ERROR' ? 500 : 200, { 'content-type': 'application/json' });
+        return res.end(reply === 'ERROR' ? '{}' : JSON.stringify({ text: ` ${reply} ` }));
+      }
       const body = raw ? (JSON.parse(raw) as Json) : {};
       const send = (status: number, data: unknown) => {
         res.writeHead(status, { 'content-type': 'application/json' });

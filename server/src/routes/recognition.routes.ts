@@ -6,9 +6,11 @@
  *   POST /recognitions/:eventId/timing  client-side latency report (evaluation harness)
  *   GET  /faces/:personId/photo       photo for the result card (consented people only)
  *   POST /ask                         simple questions, answered from the database
+ *   POST /transcribe                  voice typing: multipart field "audio" -> { text }
  *   POST /help-requests               "Ask my caregiver"
  *
- * Camera frames are processed in memory and discarded — never stored or logged.
+ * Camera frames and voice recordings are processed in memory and discarded —
+ * never stored or logged.
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -17,6 +19,7 @@ import { env, isTest } from '../config/env';
 import { ah, isObjectId, notFound } from '../lib/http';
 import { logger } from '../lib/logger';
 import { patientOrCaregiver } from '../middleware/auth';
+import { audioUpload } from '../middleware/audioUpload';
 import { imageUpload } from '../middleware/upload';
 import { validate } from '../middleware/validate';
 import { HelpRequest } from '../models/helpRequest.model';
@@ -48,6 +51,7 @@ import {
   unsureMessage,
   type SummarySource,
 } from '../services/summary.service';
+import { transcribe } from '../services/stt.service';
 
 const router = Router({ mergeParams: true });
 
@@ -245,6 +249,42 @@ router.get(
     const photo = person.photos[0];
     res.setHeader('Cache-Control', 'private, no-store');
     res.type(photo.mimeType).send(await readPhoto(photo.storageKey));
+  }),
+);
+
+const STT_MESSAGES = {
+  disabled: 'Voice typing on the server is turned off.',
+  budget: 'Voice typing is resting for today. Please type instead.',
+  rate: 'Please wait a moment before speaking again.',
+  timeout: 'That took too long. Please try again, or type instead.',
+  error: 'I could not write that down. Please try again, or type instead.',
+} as const;
+
+router.post(
+  '/transcribe',
+  ...patientOrCaregiver,
+  ...audioUpload('audio'),
+  ah(async (req, res) => {
+    const f = req.file!;
+    const r = await transcribe({
+      audio: f.buffer,
+      filename: f.originalname,
+      mime: f.mimetype,
+      lang: req.patient!.preferences?.language ?? 'en',
+      patientId: String(req.patient!._id),
+    });
+    f.buffer = Buffer.alloc(0); // drop the recording right away
+    if (r.ok) {
+      res.json({ text: r.text });
+      return;
+    }
+    const status = r.reason === 'disabled' ? 503 : r.reason === 'rate' ? 429 : 502;
+    // A short code (e.g. "groq-403") helps find the cause; details are in the server log
+    // and on the caregiver's System status card.
+    const message = r.code ? `${STT_MESSAGES[r.reason]} (${r.code})` : STT_MESSAGES[r.reason];
+    res.status(status).json({
+      error: { code: r.reason === 'disabled' ? 'VOICE_DISABLED' : 'VOICE_FAILED', message },
+    });
   }),
 );
 

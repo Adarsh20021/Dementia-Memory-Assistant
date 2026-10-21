@@ -2,7 +2,12 @@
  * Text-to-speech behind a small interface so a cloud TTS can be swapped in
  * later without touching the UI. Default: the browser's Web Speech API
  * (free, offline-capable, no key).
+ *
+ * getTTS() wraps the provider so every narration respects the patient's
+ * mute switch and can be stopped from the Stop button (see narration.ts).
  */
+import { narration, registerStopper } from './narration';
+
 export interface SpeakOptions {
   /** 0.5 (slow) .. 1.5 (fast); 1 = normal */
   rate?: number;
@@ -151,15 +156,51 @@ export class SilentTTS implements TTSProvider {
   cancel() {}
 }
 
+/** Adds mute + stop + "is speaking" tracking around any provider. */
+class NarratedTTS implements TTSProvider {
+  constructor(private readonly inner: TTSProvider) {
+    registerStopper(() => inner.cancel());
+  }
+  get name() {
+    return this.inner.name;
+  }
+  get lastError() {
+    return this.inner.lastError ?? null;
+  }
+  isAvailable() {
+    return this.inner.isAvailable();
+  }
+  async speak(text: string, opts?: SpeakOptions) {
+    if (narration.get().muted) {
+      // Voice is off: say nothing (the text is still on screen).
+      this.inner.cancel();
+      return { startedAt: performance.now() };
+    }
+    const id = narration.begin(text);
+    try {
+      const r = await this.inner.speak(text, opts);
+      narration.watch(id);
+      return r;
+    } catch (err) {
+      narration.end(id);
+      throw err;
+    }
+  }
+  cancel() {
+    this.inner.cancel();
+    narration.end();
+  }
+}
+
 let provider: TTSProvider | null = null;
 export function getTTS(): TTSProvider {
   if (!provider) {
     const web = new WebSpeechTTS();
-    provider = web.isAvailable() ? web : new SilentTTS();
+    provider = new NarratedTTS(web.isAvailable() ? web : new SilentTTS());
   }
   return provider;
 }
 /** Swap in another provider (e.g. a cloud TTS) at app start. */
 export const setTTS = (p: TTSProvider) => {
-  provider = p;
+  provider = new NarratedTTS(p);
 };

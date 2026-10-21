@@ -164,7 +164,13 @@ export default function WriteEntry() {
           />
         </div>
       )}
-      <MicButton supported={mic.supported} listening={mic.listening} onStart={mic.start} onStop={mic.stop} />
+      <MicButton
+        supported={mic.supported}
+        listening={mic.listening}
+        transcribing={mic.transcribing}
+        onStart={mic.start}
+        onStop={mic.stop}
+      />
       {mic.error && <Alert kind="warn">{mic.error}</Alert>}
       {error && <Alert kind="error">{error}</Alert>}
 

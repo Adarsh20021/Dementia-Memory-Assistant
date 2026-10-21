@@ -87,6 +87,14 @@ const schema = z
     /** Per patient, per minute. */
     LLM_PER_PATIENT_PER_MIN: z.coerce.number().int().min(1).default(6),
 
+    // --- Voice typing: speech-to-text with Groq Whisper (uses GROQ_API_KEY) ---
+    /** "groq": transcribe recordings on the server. "off": browser voice typing only. */
+    VOICE_TRANSCRIBE: z.enum(['groq', 'off']).default('groq'),
+    /** See https://console.groq.com/docs/speech-to-text (names change). */
+    GROQ_STT_MODEL: z.preprocess(blankToUndefined, z.string().default('whisper-large-v3-turbo')),
+    STT_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    STT_PER_PATIENT_PER_MIN: z.coerce.number().int().min(1).default(10),
+
     // --- Data retention job ---
     RETENTION_JOB_INTERVAL_HOURS: z.coerce.number().positive().default(6),
   })
@@ -116,6 +124,8 @@ export const isProd = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
 export const llmEnabled = () =>
   Boolean(env.GROQ_API_KEY && env.GROQ_MODEL && env.LLM_DAILY_CALL_LIMIT > 0);
+export const sttEnabled = () =>
+  Boolean(env.VOICE_TRANSCRIBE === 'groq' && env.GROQ_API_KEY && env.LLM_DAILY_CALL_LIMIT > 0);
 export const clientOrigins = env.CLIENT_ORIGINS.split(',')
   .map((o) => o.trim())
   .filter(Boolean);

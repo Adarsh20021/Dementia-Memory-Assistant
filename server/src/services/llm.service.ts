@@ -70,6 +70,9 @@ async function reserveBudget(): Promise<boolean> {
   return res.modifiedCount === 1;
 }
 
+/** One call from the shared daily AI budget (used by speech-to-text too). */
+export const reserveLlmCall = reserveBudget;
+
 /** For tests. */
 export function __resetLlmRateLimits() {
   perPatient.clear();
@@ -111,6 +114,8 @@ const scrub = (t: string) =>
 
 // ---------- call ----------
 
+const REASONING_MODEL = /gpt-oss/i;
+
 export async function chat(opts: {
   system: string;
   user: string;
@@ -138,7 +143,12 @@ export async function chat(opts: {
       body: JSON.stringify({
         model: env.GROQ_MODEL,
         temperature: 0.2,
-        max_tokens: opts.maxTokens ?? 150,
+        // Reasoning models (e.g. openai/gpt-oss-*) spend part of the token budget on hidden
+        // "thinking"; without headroom and a low effort they return an EMPTY answer.
+        max_tokens: (opts.maxTokens ?? 150) + (REASONING_MODEL.test(env.GROQ_MODEL) ? 600 : 0),
+        ...(REASONING_MODEL.test(env.GROQ_MODEL)
+          ? { reasoning_effort: 'low', include_reasoning: false }
+          : {}),
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },

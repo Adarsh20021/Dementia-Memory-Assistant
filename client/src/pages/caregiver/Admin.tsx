@@ -182,6 +182,7 @@ function SystemStatusCard() {
   });
   const ai = status.data?.ai;
   const face = status.data?.face;
+  const voice = status.data?.voice;
   const dot = (ok: boolean) => (
     <span
       aria-hidden
@@ -242,6 +243,27 @@ function SystemStatusCard() {
                   : 'running'}
           </span>
         </p>
+      )}
+      {voice && (
+        <div className="flex flex-col gap-1">
+          <p className="flex flex-wrap items-center gap-2 font-semibold">
+            {dot(voice.enabled && (voice.lastCall?.ok ?? true))} Voice typing{' '}
+            <span className="font-normal text-sub">
+              {voice.mode === 'off'
+                ? "off on the server (VOICE_TRANSCRIBE=off): the browser's own voice typing is used"
+                : !voice.enabled
+                  ? 'needs GROQ_API_KEY in server/.env'
+                  : `Groq, model ${voice.lastCall?.model ?? voice.model}`}
+            </span>
+          </p>
+          {voice.lastCall && !voice.lastCall.ok && (
+            <p className="text-sm text-bad-ink">
+              Last attempt failed{voice.lastCall.httpStatus ? ` (HTTP ${voice.lastCall.httpStatus})` : ''}:{' '}
+              {voice.lastCall.detail || 'no details'}
+            </p>
+          )}
+          {voice.lastCall?.ok && <p className="text-sm text-sub">Last attempt worked.</p>}
+        </div>
       )}
       <ErrorText error={status.error} />
     </section>

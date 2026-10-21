@@ -3,9 +3,10 @@
  * patient's voice settings and notices when the browser refuses to speak,
  * and a "Read aloud" button.
  */
-import { Volume2 } from 'lucide-react';
+import { Square, Volume2 } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { stopNarration, useNarration } from '../tts/narration';
 import { getTTS } from '../tts/TTSProvider';
 
 export function useSpeak() {
@@ -52,12 +53,29 @@ export function SpeakButton({
   className?: string;
 }) {
   const { say, problem } = useSpeak();
+  const { speaking, text: current, muted } = useNarration();
+  const [mutedHint, setMutedHint] = useState(false);
+  const mine = speaking && current === text;
+  const note = mutedHint && muted ? 'The voice is off. Tap "Voice on" at the top to hear it.' : problem;
   return (
     <span className="inline-flex flex-col items-start gap-1 self-start">
-      <button type="button" className={className} onClick={() => void say(text)}>
-        <Volume2 size={22} aria-hidden /> {label}
-      </button>
-      {problem && <span className="text-base text-warn-ink">{problem}</span>}
+      {mine ? (
+        <button type="button" className="btn-help" onClick={stopNarration} aria-label="Stop reading">
+          <Square size={20} aria-hidden /> Stop
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={className}
+          onClick={() => {
+            setMutedHint(muted);
+            void say(text);
+          }}
+        >
+          <Volume2 size={22} aria-hidden /> {label}
+        </button>
+      )}
+      {note && <span className="text-base text-warn-ink">{note}</span>}
     </span>
   );
 }

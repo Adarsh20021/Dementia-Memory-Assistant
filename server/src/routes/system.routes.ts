@@ -6,10 +6,11 @@
  *   POST /ai-test   sends one tiny request to the AI and reports what happened
  */
 import { Router } from 'express';
-import { env } from '../config/env';
+import { env, sttEnabled } from '../config/env';
 import { ah } from '../lib/http';
 import { authenticate, requireRole } from '../middleware/auth';
 import { chat, llmStatus } from '../services/llm.service';
+import { sttLastCall } from '../services/stt.service';
 
 const router = Router();
 router.use(authenticate, requireRole('caregiver'));
@@ -37,7 +38,8 @@ router.get(
   '/status',
   ah(async (_req, res) => {
     const [ai, face] = await Promise.all([llmStatus(), faceStatus()]);
-    res.json({ ai, face });
+    const voice = { enabled: sttEnabled(), mode: env.VOICE_TRANSCRIBE, model: env.GROQ_STT_MODEL, lastCall: sttLastCall() };
+    res.json({ ai, face, voice });
   }),
 );
 

@@ -1,15 +1,17 @@
 /** Home, caregiver sign-in / sign-up, patient device pairing, privacy notice. */
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, api } from '../api/client';
 import { forgetDevice, readDeviceHint, useAuth, type DeviceHint } from '../auth/AuthContext';
 import { Alert, BrandMark, Disclaimer } from '../components/ui';
 
 function Shell({ children, title }: { children: React.ReactNode; title: string }) {
+  const { pathname } = useLocation();
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
       <aside className="flex flex-col justify-between gap-10 bg-side px-6 py-8 text-side-ink sm:px-10 lg:min-h-screen lg:py-12">
-        <Link to="/" className="flex items-center gap-3 text-white">
+        <Link to="/" className="flex items-center gap-3 text-white" aria-label="Memory Assistant, go to home page">
           <BrandMark />
           <span className="font-serif text-xl font-semibold">Memory Assistant</span>
         </Link>
@@ -25,6 +27,11 @@ function Shell({ children, title }: { children: React.ReactNode; title: string }
         <p className="hidden text-sm lg:block">Face data is encrypted and only used with recorded consent.</p>
       </aside>
       <div className="mx-auto flex min-h-[70vh] w-full max-w-xl flex-col gap-6 px-6 py-10 lg:min-h-screen lg:justify-center">
+        {pathname !== '/' && (
+          <Link to="/" className="btn-secondary self-start">
+            <ArrowLeft size={20} aria-hidden /> Back to home
+          </Link>
+        )}
         <h1 className="text-3xl">{title}</h1>
         <main className="flex flex-col gap-4">{children}</main>
         <footer className="mt-4">
@@ -371,6 +378,11 @@ export function Privacy() {
           relationship, visit dates and caregiver-approved memories) may be sent to an AI service (Groq).
           Photos, face data and full names are never sent. If the AI is unavailable, a simple built-in
           sentence is used.
+        </p>
+        <p>
+          <strong>Voice typing.</strong> When someone taps a microphone button, the short recording is sent to
+          the same AI service (Groq) only to turn it into text. The recording is not stored by this app, and it is
+          deleted from memory as soon as the text comes back.
         </p>
         <p>
           <strong>How long we keep data.</strong> Visit records are deleted automatically after the retention

@@ -397,6 +397,7 @@ export function NewMemory() {
           <MicButton
             supported={mic.supported}
             listening={mic.listening}
+            transcribing={mic.transcribing}
             onStart={mic.start}
             onStop={mic.stop}
             label="Dictate"
@@ -427,6 +428,7 @@ export function NewMemory() {
         <MicButton
           supported={summaryMic.supported}
           listening={summaryMic.listening}
+          transcribing={summaryMic.transcribing}
           onStart={summaryMic.start}
           onStop={summaryMic.stop}
           label="Dictate the memory"
