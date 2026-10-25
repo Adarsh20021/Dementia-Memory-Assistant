@@ -89,7 +89,11 @@ export function validateAgainstFacts(
 
 /** Simple, no-AI shortening: the first two sentences of the notes, at most 45 words. */
 function shorten(notes: string): string {
-  const sentences = notes.replace(/\s+/g, ' ').trim().match(/[^.!?]+[.!?]*/g) ?? [];
+  const sentences =
+    notes
+      .replace(/\s+/g, ' ')
+      .trim()
+      .match(/[^.!?]+[.!?]*/g) ?? [];
   const words = sentences.slice(0, 2).join(' ').trim().split(' ');
   const out = words.slice(0, 45).join(' ').trim();
   return out && !/[.!?]$/.test(out) ? `${out}.` : out;
@@ -242,6 +246,58 @@ export async function phraseAnswer(
     .filter((w) => !['This', 'They', 'I', 'You', 'Your', 'The'].includes(w))
     .every((w) => text.includes(w));
   return check.ok && keepsFacts ? { text, source: 'llm' } : { text: fact, source: 'fallback' };
+}
+
+/**
+ * Answers a question about one person from their approved memories ("When did
+ * I meet Priya?", "What did Arjun bring?"). Only approved, consent-approved
+ * memories may be passed in. Returns null when the AI is unavailable or its
+ * answer fails the guardrails; the database answer is shown either way.
+ */
+export async function answerFromMemories(
+  patientId: string,
+  input: {
+    question: string;
+    firstName: string;
+    relationship: string;
+    fact: string;
+    memories: { when: string; text: string }[];
+  },
+  timeoutMs: number = env.LLM_ASK_TIMEOUT_MS,
+): Promise<{ text: string; source: 'llm' | 'cache' } | null> {
+  if (!input.memories.length) return null;
+  const prompt = loadPrompt('memoryAnswer');
+  const memoryLines = input.memories.map((m) => `- (${m.when}) ${m.text}`).join('\n');
+  const key = `memans|${prompt.version}|${patientId}|${createHash('sha256')
+    .update(`${input.question.toLowerCase()}|${input.fact}|${memoryLines}`)
+    .digest('hex')}`;
+  const cached = cacheGet(key);
+  if (cached) return { text: cached, source: 'cache' };
+  const result = await chat({
+    system: prompt.text,
+    user:
+      `QUESTION: ${input.question}\nPERSON: ${input.firstName}, your ${input.relationship}\n` +
+      `FACT: ${input.fact}\nMEMORIES:\n${memoryLines}`,
+    patientId,
+    timeoutMs,
+    maxTokens: 120,
+  });
+  if (!result.ok) return null;
+  const text = clean(result.text);
+  const check = validateAgainstFacts(
+    text,
+    [
+      input.question,
+      input.fact,
+      input.firstName,
+      input.relationship,
+      ...input.memories.flatMap((m) => [m.when, m.text]),
+    ],
+    { maxSentences: 3, maxWords: 55 },
+  );
+  if (!check.ok) return null;
+  cacheSet(key, text);
+  return { text, source: 'llm' };
 }
 
 /**

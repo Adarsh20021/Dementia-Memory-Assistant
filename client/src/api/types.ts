@@ -187,6 +187,8 @@ export interface AskResponse {
   summarySource?: 'llm' | 'none';
   found: boolean;
   personId?: string;
+  /** For questions about one person: their most relevant memories (best match first). */
+  memories?: PersonStory['memories'];
 }
 
 export interface SystemStatus {

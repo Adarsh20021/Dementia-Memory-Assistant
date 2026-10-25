@@ -33,11 +33,11 @@ export function AskCaregiverButton({ context, large = false }: { context?: strin
     <div className="flex flex-col items-stretch gap-2">
       <button
         type="button"
-        className={`btn-help ${large ? 'min-h-[72px] text-xl' : ''}`}
+        className={`btn-help max-sm:px-4 max-sm:leading-tight ${large ? 'min-h-[72px] text-xl' : ''}`}
         onClick={ask}
         disabled={busy}
       >
-        <HandHelping size={24} aria-hidden /> Ask my caregiver
+        <HandHelping size={24} aria-hidden className="shrink-0" /> Ask my caregiver
       </button>
       {message && (
         <p role="status" className="rounded-2xl bg-warn-bg p-3 text-warn-ink">

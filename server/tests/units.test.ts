@@ -5,7 +5,13 @@ import type { FrameAnalysis } from '../src/services/faceClient.service';
 import { decide, type DecisionConfig } from '../src/services/decision.service';
 import { assembleContext } from '../src/services/context.service';
 import { fallbackSummary, validateAgainstFacts } from '../src/services/summary.service';
-import { answerFact, parseQuestion, type AskPerson } from '../src/services/ask.service';
+import {
+  answerFact,
+  parseQuestion,
+  rankMemories,
+  type AskMemory,
+  type AskPerson,
+} from '../src/services/ask.service';
 import { susScore } from '../src/models/susResponse.model';
 
 const cfg: DecisionConfig = {
@@ -223,6 +229,88 @@ describe('patient questions (database first)', () => {
   it('unknown person / unsupported -> gentle redirect', () => {
     expect(ask('When did Rahul visit?')).toMatch(/ask your caregiver/);
     expect(ask('What is the weather?')).toMatch(/ask your caregiver/);
+  });
+  it('"meet" / "met" questions are last-visit questions', () => {
+    expect(parseQuestion('When did Priya meet?', people).kind).toBe('last_visit');
+    expect(parseQuestion('When did I meet Priya?', people).kind).toBe('last_visit');
+    expect(parseQuestion('When did I last see my grandson?', people).kind).toBe('last_visit');
+    expect(ask('When did Priya meet me?')).toBe('Priya last visited on Monday 12 October.');
+  });
+
+  const memories: AskMemory[] = [
+    {
+      id: 'm1',
+      personId: '1',
+      text: 'Priya brought mangoes from the market.',
+      at: new Date('2026-10-01T10:00:00'),
+    },
+    {
+      id: 'm2',
+      personId: '1',
+      text: 'You looked at the wedding album with Priya.',
+      at: new Date('2026-10-10T10:00:00'),
+    },
+    {
+      id: 'm3',
+      personId: '2',
+      text: 'Arjun played chess with you.',
+      at: new Date('2026-10-14T10:00:00'),
+    },
+  ];
+  const priyaMemories = memories.filter((m) => m.personId === '1');
+
+  it('any other question naming a person is answered from their memories', () => {
+    const intent = parseQuestion('What did Priya bring?', people);
+    expect(intent.kind).toBe('about_person');
+    const ranked = rankMemories('What did Priya bring?', people[0], priyaMemories);
+    expect(ranked[0].id).toBe('m1');
+    expect(answerFact(intent, { visits, people, memories: ranked, now }).fact).toBe(
+      'Here is a memory about Priya, from Thursday 1 October: Priya brought mangoes from the market.',
+    );
+    expect(
+      answerFact(parseQuestion('Tell me about Meera', people), {
+        visits,
+        people,
+        memories: [],
+        now,
+      }).fact,
+    ).toBe("I don't have any memories about Meera saved yet.");
+  });
+  it('rankMemories: shared words first, newest on a tie, the name does not count', () => {
+    expect(rankMemories('Tell me about Priya', people[0], priyaMemories).map((m) => m.id)).toEqual([
+      'm2',
+      'm1',
+    ]);
+    expect(rankMemories('the wedding photos', people[0], priyaMemories)[0].id).toBe('m2');
+    expect(rankMemories('mango', people[0], priyaMemories)[0].id).toBe('m1');
+  });
+  it('last visit falls back to the newest memory when no visit is saved', () => {
+    const noVisits = answerFact(parseQuestion('When did I meet Priya?', people), {
+      visits: [],
+      people,
+      memories: priyaMemories,
+      now,
+    }).fact;
+    expect(noVisits).toBe(
+      'The last memory about Priya was saved on Saturday 10 October: You looked at the wedding album with Priya.',
+    );
+    // Visit history not shared, but there is a memory: still answered from the memory.
+    const meera = answerFact(parseQuestion('When did Meera visit?', people), {
+      visits,
+      people,
+      memories: [
+        {
+          id: 'x',
+          personId: '3',
+          text: 'Meera brought flowers.',
+          at: new Date('2026-10-13T09:00:00'),
+        },
+      ],
+      now,
+    }).fact;
+    expect(meera).toBe(
+      'The last memory about Meera was saved on Tuesday 13 October: Meera brought flowers.',
+    );
   });
 });
 

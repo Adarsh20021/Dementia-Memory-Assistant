@@ -32,6 +32,7 @@ import { ScheduledVisit } from '../models/scheduledVisit.model';
 import {
   answerFact,
   parseQuestion,
+  rankMemories,
   whenPlanned,
   type AskPerson,
   type AskPlanned,
@@ -46,6 +47,7 @@ import {
   LIVENESS_MESSAGE,
   NO_FACE_MESSAGE,
   UNKNOWN_MESSAGE,
+  answerFromMemories,
   patientSummary,
   phraseAnswer,
   unsureMessage,
@@ -326,21 +328,79 @@ router.post(
         ? await plannedVisits(patient._id)
         : [];
     const lang = patient.preferences?.language ?? 'en';
-    const { fact, found } = answerFact(intent, { visits, people: askPeople, planned, lang });
+    const aboutPerson =
+      intent.kind === 'who_is' ||
+      intent.kind === 'last_visit' ||
+      intent.kind === 'next_visit' ||
+      intent.kind === 'about_person'
+        ? people.find((p) => String(p._id) === intent.person.id)
+        : undefined;
+
+    // That person's memories, with the same rules as their story page: approved +
+    // consent-approved ones (if consent covers summaries), plus the patient's own
+    // non-flagged entries. Only approved ones are ever sent to the AI.
+    const memories = aboutPerson
+      ? (await visibleMemories(aboutPerson, patient._id, req.user!)).map((m) => ({
+          id: String(m._id),
+          personId: String(aboutPerson._id),
+          text: memorySummary(m),
+          at: m.get('createdAt') as Date,
+          approved: m.reviewStatus === 'approved' && m.consentApproved,
+          mine: String(m.authorId) === req.user!.id,
+          source: m.source,
+          reviewStatus: m.reviewStatus,
+        }))
+      : [];
+    const ranked = aboutPerson ? rankMemories(question, aboutPerson, memories) : [];
+
+    const { fact, found } = answerFact(intent, {
+      visits,
+      people: askPeople,
+      planned,
+      memories: ranked,
+      lang,
+    });
+    // Same shape as the story page's memories, so the patient screen can reuse it.
+    const related = ranked.slice(0, 3).map((m) => ({
+      id: m.id,
+      summary: m.text,
+      source: m.source,
+      mine: m.mine,
+      reviewStatus: m.reviewStatus,
+      /** Only these may be re-told by the AI ("Tell me simply"). */
+      canRetell: m.approved,
+      createdAt: m.at,
+      date: formatVisitDate(m.at, lang).date,
+    }));
     if (!found) {
-      res.json({ answer: fact, source: 'database', found: false });
+      res.json({ answer: fact, source: 'database', found: false, memories: related });
       return;
     }
 
     // The answer (from the database) is always shown. The AI adds a short summary:
-    // for a question about one person, a summary of what we know about them
-    // (approved memories + visits); otherwise a gentle re-phrasing of the answer.
-    const aboutPerson =
-      intent.kind === 'who_is' || intent.kind === 'last_visit' || intent.kind === 'next_visit'
-        ? people.find((p) => String(p._id) === intent.person.id)
-        : undefined;
+    // for questions about memories, an answer built only from approved memories;
+    // for other questions about one person, a summary of what we know about them;
+    // otherwise a gentle re-phrasing of the answer.
     let summary: { text: string; source: string } | null = null;
-    if (aboutPerson) {
+    const approvedRanked = ranked.filter((m) => m.approved).slice(0, 5);
+    const fromMemories =
+      aboutPerson &&
+      (intent.kind === 'about_person' || intent.kind === 'last_visit') &&
+      approvedRanked.length
+        ? await answerFromMemories(String(patient._id), {
+            question,
+            firstName: firstNameOf(aboutPerson.name),
+            relationship: aboutPerson.relationship,
+            fact,
+            memories: approvedRanked.map((m) => ({
+              when: formatVisitDate(m.at, lang).date,
+              text: m.text,
+            })),
+          })
+        : null;
+    if (fromMemories) {
+      summary = { text: fromMemories.text, source: 'llm' };
+    } else if (aboutPerson) {
       const ctx = await buildPersonContext(aboutPerson, { lang });
       const s = await patientSummary(
         String(aboutPerson._id),
@@ -360,9 +420,28 @@ router.post(
       source: 'database',
       found: true,
       personId: aboutPerson ? String(aboutPerson._id) : undefined,
+      memories: related,
     });
   }),
 );
+
+/** Memories about one person that this requester may see (see /story). */
+async function visibleMemories(
+  person: PersonDoc,
+  patientId: Types.ObjectId,
+  user: { id: string; role: string },
+) {
+  const scope = person.consent?.scope ?? [];
+  const filter: Record<string, unknown>[] = [];
+  if (scope.includes('conversation-summaries'))
+    filter.push({ reviewStatus: 'approved', consentApproved: true });
+  if (user.role === 'patient')
+    filter.push({ authorId: new Types.ObjectId(user.id), reviewStatus: { $ne: 'flagged' } });
+  if (!filter.length) return [];
+  return Memory.find({ patientId, personId: person._id, $or: filter })
+    .sort({ createdAt: -1 })
+    .limit(50);
+}
 
 /** Upcoming planned visits, labelled, for questions like "Who is coming tomorrow?". */
 async function plannedVisits(patientId: Types.ObjectId): Promise<AskPlanned[]> {

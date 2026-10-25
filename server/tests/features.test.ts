@@ -298,6 +298,56 @@ describe('person story and "Tell me simply"', () => {
     expect(res.body.summarySource).toBe('llm');
     expect(res.body.summary).toContain('mangoes');
   });
+
+  it('a memory question is answered from that person’s memories', async () => {
+    mocks.llmReply = () => 'Priya brought you mangoes and you played cards together.';
+    __clearSummaryCache();
+    const res = await request(app)
+      .post(`/api/patients/${patientId}/ask`)
+      .set(bearer(pt))
+      .send({ question: 'What did Priya bring?' })
+      .expect(200);
+    expect(res.body.found).toBe(true);
+    expect(res.body.answer).toMatch(
+      /^Here is a memory about Priya, from .+: Priya brought mangoes/,
+    );
+    expect(res.body.summary).toContain('mangoes');
+    // Related memories are listed; the patient also sees their own (pending) entry.
+    const ids = res.body.memories.map((m: { id: string }) => m.id);
+    expect(ids).toEqual(expect.arrayContaining([approvedId, pendingId]));
+    expect(res.body.memories.find((m: { id: string }) => m.id === pendingId)).toMatchObject({
+      reviewStatus: 'pending',
+      canRetell: false,
+      mine: true,
+    });
+    // ...but only approved memories are ever sent to the AI.
+    expect(JSON.stringify(mocks.llmRequests)).not.toContain('PATIENT-OWN-TEXT');
+  });
+
+  it('"When did I meet Priya?" uses the memories when no visit is saved', async () => {
+    mocks.llmReply = () => 'Priya visited and brought mangoes, and you played cards.';
+    __clearSummaryCache();
+    const res = await request(app)
+      .post(`/api/patients/${patientId}/ask`)
+      .set(bearer(pt))
+      .send({ question: 'When did I meet Priya?' })
+      .expect(200);
+    expect(res.body.found).toBe(true);
+    expect(res.body.answer).toMatch(/^The last memory about Priya was saved on /);
+    expect(res.body.memories.length).toBeGreaterThan(0);
+  });
+
+  it('an AI answer that invents details is dropped; the database answer stays', async () => {
+    mocks.llmReply = () => 'Priya took you to Goa for a holiday.';
+    __clearSummaryCache();
+    const res = await request(app)
+      .post(`/api/patients/${patientId}/ask`)
+      .set(bearer(pt))
+      .send({ question: 'What did Priya bring?' })
+      .expect(200);
+    expect(res.body.answer).toMatch(/mangoes/);
+    expect(res.body.summary ?? '').not.toContain('Goa');
+  });
 });
 
 describe('directory and system status', () => {

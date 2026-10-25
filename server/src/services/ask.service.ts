@@ -8,7 +8,14 @@
  *   "Who came today / yesterday / this week?" -> visitors in that range
  *   "When is Priya coming?"              -> next planned visit of that person
  *   "Who is coming today / tomorrow / this week?" -> planned visits in that range
+ *   "When did I meet Priya?" / "When did Priya meet me?" -> last visit, or the
+ *                                         latest memory about her if no visit is saved
+ *   "What did Priya bring?" / "Tell me about Arjun" -> the most relevant saved
+ *                                         memory about that person (about_person)
  * Anything else -> a gentle "please ask your caregiver".
+ *
+ * Memories are matched to the question by shared words (rankMemories), newest
+ * first on a tie. The route only passes in memories the requester may see.
  */
 import { firstNameOf, formatVisitDate } from './context.service';
 
@@ -17,6 +24,16 @@ export interface AskPerson {
   name: string;
   relationship: string;
   canShareVisits: boolean;
+}
+
+/** A memory the requester is allowed to see (already decrypted). */
+export interface AskMemory {
+  id: string;
+  personId: string;
+  text: string;
+  at: Date;
+  /** Caregiver-approved. Preferred over unreviewed entries when equally relevant. */
+  approved?: boolean;
 }
 
 export interface AskVisit {
@@ -37,6 +54,7 @@ export type AskIntent =
   | { kind: 'visitors'; range: 'today' | 'yesterday' | 'week' }
   | { kind: 'next_visit'; person: AskPerson }
   | { kind: 'upcoming'; range: 'today' | 'tomorrow' | 'week' }
+  | { kind: 'about_person'; person: AskPerson }
   | { kind: 'unknown_person' }
   | { kind: 'unsupported' };
 
@@ -85,7 +103,9 @@ export function parseQuestion(question: string, people: AskPerson[]): AskIntent 
   }
 
   const asksVisitors =
-    /\b(who|anyone|anybody|visitors?)\b.*\b(came|come|visited|visit|here|saw|see)\b/.test(q);
+    /\b(who|anyone|anybody|visitors?)\b.*\b(came|come|visited|visit|here|saw|see|met|meet)\b/.test(
+      q,
+    );
   const range: 'today' | 'yesterday' | 'week' | null = /\byesterday\b/.test(q)
     ? 'yesterday'
     : /\b(this week|week)\b/.test(q)
@@ -96,14 +116,89 @@ export function parseQuestion(question: string, people: AskPerson[]): AskIntent 
   if (asksVisitors && range && !person) return { kind: 'visitors', range };
 
   const asksWhen =
-    /\b(when|last time|how long)\b/.test(q) && /\b(visit|visited|came|come|see|saw|here)\b/.test(q);
+    /\b(when|last time|how long)\b/.test(q) &&
+    /\b(visit|visited|visiting|came|come|see|saw|seen|here|meet|met|meeting)\b/.test(q);
   if (asksWhen) return person ? { kind: 'last_visit', person } : { kind: 'unknown_person' };
 
   if (/\bwho (is|was|s)\b/.test(q) || /\bwho's\b/.test(q)) {
     return person ? { kind: 'who_is', person } : { kind: 'unknown_person' };
   }
   if (asksVisitors && !person) return { kind: 'visitors', range: 'today' };
+  // Any other question that names someone we know: answer from their memories.
+  if (person) return { kind: 'about_person', person };
   return { kind: 'unsupported' };
+}
+
+// ---------------------------------------------------------------- memories
+
+const STOP = new Set(
+  (
+    'a an the and or but of to in on at for with from by about as is are was were be been am ' +
+    'do does did done have has had i me my mine you your we our us he she him her his hers they ' +
+    'them their it its this that these those what when where who whom which why how there here ' +
+    'tell remember please can could would will just last time day ever also some any so very ' +
+    'meet met meeting visit visited visiting came come see saw seen'
+  ).split(' '),
+);
+
+/** Common irregular past tenses, so "What did Priya bring?" matches "brought". */
+const IRREGULAR: Record<string, string> = {
+  brought: 'bring',
+  bought: 'buy',
+  ate: 'eat',
+  went: 'go',
+  gave: 'give',
+  made: 'make',
+  took: 'take',
+  told: 'tell',
+  sang: 'sing',
+  drank: 'drink',
+  wrote: 'write',
+  read: 'read',
+  sat: 'sit',
+  spoke: 'speak',
+  taught: 'teach',
+  thought: 'think',
+  cooked: 'cook',
+};
+
+/** Content words of a text, lower-cased, with a light plural/past-tense trim. */
+function keywords(text: string, exclude: string[] = []): Set<string> {
+  const out = new Set<string>();
+  const ex = new Set(exclude.map((w) => norm(w)));
+  for (const raw of norm(text).split(' ')) {
+    if (raw.length < 3 || STOP.has(raw) || ex.has(raw)) continue;
+    const base = IRREGULAR[raw] ?? raw;
+    out.add(base.replace(/(ies|es|s|ed|ing)$/, '') || base);
+  }
+  return out;
+}
+
+/**
+ * Orders a person's memories by how well they match the question: number of
+ * shared content words (the person's own name and relationship do not count);
+ * on a tie, approved before unreviewed, then newest first. Pure, unit-tested.
+ */
+export function rankMemories<T extends AskMemory>(
+  question: string,
+  person: Pick<AskPerson, 'name' | 'relationship'>,
+  memories: T[],
+): T[] {
+  const q = keywords(question, [...person.name.split(/\s+/), person.relationship]);
+  return memories
+    .map((m) => {
+      const words = keywords(m.text);
+      let score = 0;
+      for (const w of q) if (words.has(w)) score++;
+      return { m, score };
+    })
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        Number(b.m.approved ?? true) - Number(a.m.approved ?? true) ||
+        b.m.at.getTime() - a.m.at.getTime(),
+    )
+    .map((x) => x.m);
 }
 
 const joinNames = (names: string[]) =>
@@ -138,6 +233,8 @@ export function answerFact(
     visits: AskVisit[];
     people: AskPerson[];
     planned?: AskPlanned[];
+    /** For person questions: that person's memories, best match first (rankMemories). */
+    memories?: AskMemory[];
     lang?: string;
     now?: Date;
   },
@@ -178,11 +275,27 @@ export function answerFact(
     case 'last_visit': {
       const p = intent.person;
       const name = firstNameOf(p.name);
-      if (!p.canShareVisits) return { fact: NOT_SURE, found: false };
-      const last = data.visits
-        .filter((v) => v.personId === p.id)
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
-      if (!last) return { fact: `I don't have a visit from ${name} saved yet.`, found: true };
+      const last = p.canShareVisits
+        ? data.visits
+            .filter((v) => v.personId === p.id)
+            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0]
+        : undefined;
+      if (!last && !p.canShareVisits && !data.memories?.length)
+        return { fact: NOT_SURE, found: false };
+      if (!last) {
+        // No visit record: the newest memory about them is the best clue we have.
+        const newest = [...(data.memories ?? [])].sort(
+          (a, b) => b.at.getTime() - a.at.getTime(),
+        )[0];
+        if (newest) {
+          const { date } = formatVisitDate(newest.at, data.lang, now);
+          return {
+            fact: `The last memory about ${name} was saved on ${date}: ${newest.text}`,
+            found: true,
+          };
+        }
+        return { fact: `I don't have a visit from ${name} saved yet.`, found: true };
+      }
       const { date, daysAgo } = formatVisitDate(last.timestamp, data.lang, now);
       const when = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `on ${date}`;
       return { fact: `${name} last visited ${when}.`, found: true };
@@ -210,6 +323,13 @@ export function answerFact(
       const names = ids.map((id) => firstNameOf(shareable.get(id)!.name));
       const capital = label.charAt(0).toUpperCase() + label.slice(1);
       return { fact: `${capital}, ${joinNames(names)} visited.`, found: true };
+    }
+    case 'about_person': {
+      const name = firstNameOf(intent.person.name);
+      const best = data.memories?.[0];
+      if (!best) return { fact: `I don't have any memories about ${name} saved yet.`, found: true };
+      const { date } = formatVisitDate(best.at, data.lang, now);
+      return { fact: `Here is a memory about ${name}, from ${date}: ${best.text}`, found: true };
     }
     default:
       return { fact: NOT_SURE, found: false };

@@ -10,17 +10,16 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { CalendarClock, Camera, CameraOff, PenLine, ScanFace, Sparkles } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
 import type { AskResponse, PersonStory, RecognitionResult, ScheduledVisit } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AskCaregiverButton } from '../../components/AskCaregiverButton';
 import { SpeakButton, useSpeak } from '../../components/speech';
-import { AuthImage, MicButton, whenText } from '../../components/ui';
+import { AuthImage, whenText } from '../../components/ui';
 import { useCamera } from '../../hooks/useCamera';
 import { localPref } from '../../hooks/useDraft';
-import { useSpeechInput } from '../../hooks/useSpeechInput';
 
 const FRAMES = 5;
 const FRAME_INTERVAL_MS = 350;
@@ -355,7 +354,6 @@ function AskBox() {
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState<AskResponse | null>(null);
   const [busy, setBusy] = useState(false);
-  const prefs = patient!.preferences;
   const askQuestion = async (q: string) => {
     if (q.trim().length < 2) return;
     setBusy(true);
@@ -373,15 +371,6 @@ function AskBox() {
     e.preventDefault();
     void askQuestion(question);
   };
-  const askRef = useRef(askQuestion);
-  askRef.current = askQuestion;
-  // A spoken question replaces the box and is asked straight away.
-  const onText = useCallback((t: string) => {
-    const q = t.trim().slice(0, 300);
-    setQuestion(q);
-    void askRef.current(q);
-  }, []);
-  const mic = useSpeechInput(onText, prefs.language);
 
   return (
     <form onSubmit={ask} className="card flex flex-col gap-3">
@@ -392,29 +381,15 @@ function AskBox() {
         id="ask"
         className="input text-xl"
         placeholder="When is Priya coming?"
-        value={mic.listening && mic.interim ? `${question} ${mic.interim}`.trim() : question}
+        value={question}
         onChange={(e) => setQuestion(e.target.value)}
-        readOnly={mic.listening}
         maxLength={300}
       />
-      {mic.listening && (
-        <p className="text-sub" role="status">
-          {mic.interim ? `I heard: "${mic.interim}"` : 'Listening… ask your question. I will stop when you finish.'}
-        </p>
-      )}
       <div className="flex flex-wrap gap-3">
         <button className="btn-primary" disabled={busy || question.trim().length < 2}>
           {busy ? 'Thinking…' : 'Ask'}
         </button>
-        <MicButton
-          supported={mic.supported}
-          listening={mic.listening}
-          transcribing={mic.transcribing}
-          onStart={mic.start}
-          onStop={mic.stop}
-        />
       </div>
-      {mic.error && <p className="text-warn-ink">{mic.error}</p>}
       {result && (
         <div className="flex flex-col gap-3" role="status" data-testid="ask-result">
           <div className="rounded-2xl bg-soft p-4">
@@ -430,6 +405,18 @@ function AskBox() {
             </div>
           )}
           <SpeakButton text={result.summary ? `${result.answer} ${result.summary}` : result.answer} />
+          {result.memories && result.memories.length > 0 && (
+            <section className="flex flex-col gap-3" aria-label="Related memories">
+              <h3 className="text-xl font-semibold">
+                {result.memories.length === 1 ? 'A memory that may help' : 'Memories that may help'}
+              </h3>
+              <ul className="flex flex-col gap-3">
+                {result.memories.map((m) => (
+                  <MemoryItem key={m.id} memory={m} />
+                ))}
+              </ul>
+            </section>
+          )}
           {!result.found && <AskCaregiverButton context="ask-unknown" />}
         </div>
       )}
