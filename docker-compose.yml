@@ -2,12 +2,6 @@
 # Full stack in containers:   podman compose up --build   (or docker compose up --build)
 # Secrets come from ./server/.env (created by npm run setup) and ./.env (FACE_SERVICE_SECRET).
 services:
-  mongo:
-    image: mongo:7
-    restart: unless-stopped
-    volumes:
-      - mongo-data:/data/db
-    # Not published to the host; only the server can reach it.
 
   face-service:
     build: ./face-service
@@ -22,7 +16,7 @@ services:
     env_file: ./server/.env
     environment:
       NODE_ENV: production
-      MONGO_URI: mongodb://mongo:27017/dementia_assistant
+      HOST: 0.0.0.0
       FACE_SERVICE_URL: http://face-service:8000
       FACE_SERVICE_SECRET: ${FACE_SERVICE_SECRET}
       CLIENT_ORIGINS: http://localhost:4000
@@ -33,10 +27,8 @@ services:
     ports:
       - '4000:4000'
     depends_on:
-      - mongo
       - face-service
 
 
 volumes:
-  mongo-data:
   uploads:
